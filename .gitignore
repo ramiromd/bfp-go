@@ -1,0 +1,58 @@
+# --- Go ---------------------------------------------------------------------
+
+# Binarios compilados
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+budget
+/bin/
+/dist/
+
+# Binarios y salidas de tests
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Dependencias vendorizadas (el proyecto usa go modules)
+/vendor/
+
+# Archivos de workspace de Go (son locales de cada máquina)
+go.work
+go.work.sum
+
+# Perfiles de profiling
+*.prof
+*.pprof
+
+# --- Claude Code ------------------------------------------------------------
+
+# Configuración local del harness: se versiona .claude/settings.json y
+# .claude/skills/, pero no las preferencias y permisos de cada máquina.
+.claude/settings.local.json
+.claude/*.local.json
+
+# Memoria e instrucciones personales, no compartidas con el equipo
+CLAUDE.local.md
+.claude/memory/
+
+# --- Datos del proyecto -----------------------------------------------------
+
+# Extractos y resúmenes bancarios reales: contienen datos personales
+# (números de cuenta, CUIT, tarjetas). Se versiona la estructura de carpetas,
+# no su contenido.
+/resources/input/*
+/resources/output/*
+!/resources/input/.gitkeep
+!/resources/output/.gitkeep
+
+# --- Editores y sistema operativo -------------------------------------------
+
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
