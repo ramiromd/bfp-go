@@ -1,0 +1,6 @@
+beneficiaries:
+  - id: "pedidosya"
+    name: "PedidosYa"
+    description: "PedidosYa es una plataforma de entrega de comidas y productos"
+    pattern: "PEDIDOSYA"
+    subcategory_id: "delivery"

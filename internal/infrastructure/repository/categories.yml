@@ -1,0 +1,13 @@
+categories:
+  - id: "services"
+    name: "Servicios básicos"
+    description: "Servicios esenciales incluyendo agua, electricidad y gas."
+  - id: "schools"
+    name: "Escuelas"
+    description: "Instituciones educativas para todos los niveles."
+  - id: "transport"
+    name: "Transporte"
+    description: "Opciones de transporte público y privado, combustible, peajes, etc ..."
+  - id: "food"
+    name: "Alimentos"
+    description: "Supermercados, mercados locales y tiendas de alimentos."

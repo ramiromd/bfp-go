@@ -25,5 +25,5 @@ type Movement struct {
 	// comments son las observaciones asociadas al movimiento.
 	Comments string
 	// category es la categoría del movimiento.
-	Category string
+	Classification *Subcategory
 }

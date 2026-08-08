@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"ramiromd/budget/internal/domain/entity"
+	"ramiromd/budget/internal/infrastructure/repository"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +74,25 @@ func (this *GaliciaAccountMovementConverter) Convert(record []string) *entity.Mo
 	reference := fmt.Sprintf("%s|%.2f|%s", date.Format("2006-01-02"), amount, description)
 	movementId := uuid.NewMD5(uuid.Nil, []byte(reference))
 
+	beneficiaryRepository := repository.NewYamlBeneficiaryRepository()
+	beneficiaries, err := beneficiaryRepository.FindAll()
+
+	subcategoryRepository := repository.NewYamlSubcategoryRepository()
+	var subcategory *entity.Subcategory
+
+	if err == nil {
+		for _, beneficiary := range beneficiaries {
+			re := regexp.MustCompile("(?i)" + beneficiary.Pattern)
+			if re.MatchString(description) {
+				sb, err := subcategoryRepository.FindById(beneficiary.SubcategoryId)
+				if err == nil && sb != nil {
+					subcategory = sb
+				}
+			}
+
+		}
+	}
+
 	movement := &entity.Movement{}
 	movement.Id = movementId
 	movement.Date = date
@@ -81,7 +102,7 @@ func (this *GaliciaAccountMovementConverter) Convert(record []string) *entity.Mo
 	movement.SettlementDate = date
 	movement.Installments = 1
 	movement.InstallmentNumber = 1
-	movement.Category = "Sin categoría"
+	movement.Classification = subcategory
 
 	return movement
 }
