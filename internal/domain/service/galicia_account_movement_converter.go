@@ -69,15 +69,21 @@ func (this *GaliciaAccountMovementConverter) Convert(record []string) *entity.Mo
 	}
 
 	amount := credit - debit
+	reference := fmt.Sprintf("%s|%.2f|%s", date.Format("2006-01-02"), amount, description)
+	movementId := uuid.NewMD5(uuid.Nil, []byte(reference))
 
-	return &entity.Movement{
-		Id:          uuid.New(),
-		Date:        date,
-		Amount:      amount,
-		Description: description,
-		Comments:    comments,
-		Category:    "",
-	}
+	movement := &entity.Movement{}
+	movement.Id = movementId
+	movement.Date = date
+	movement.Description = description
+	movement.Amount = credit - debit
+	movement.Comments = comments
+	movement.SettlementDate = date
+	movement.Installments = 1
+	movement.InstallmentNumber = 1
+	movement.Category = "Sin categoría"
+
+	return movement
 }
 
 func (this *GaliciaAccountMovementConverter) GetDescription() string {
