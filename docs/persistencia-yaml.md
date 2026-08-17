@@ -44,9 +44,9 @@ compartir unas pocas líneas.
   tags `yaml:"..."` viven acá.
 - Expone algo como `Records() ([]categoryRecord, error)`, agregando todos los
   archivos del tipo en una sola colección ordenada.
-- Cachea en memoria después de la primera carga (de ahí "Memory" en el
+- ~~Cachea en memoria después de la primera carga (de ahí "Memory" en el
   nombre original propuesto) — mismo patrón *lazy* que hoy tiene
-  `initialize()`, pero acotado a records, no a entidades.
+  `initialize()`, pero acotado a records, no a entidades.~~
 - **No** sabe nada de `entity.Category`, de padres ni de índices por id. Un
   YAML mal formado es su error; un id duplicado o un padre inexistente no —
   eso requiere mirar la colección completa, no la forma de un registro.
