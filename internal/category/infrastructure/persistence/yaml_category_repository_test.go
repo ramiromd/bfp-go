@@ -292,6 +292,86 @@ func TestYamlCategoryRepositoryFromDatasource_Count(t *testing.T) {
 	})
 }
 
+func TestYamlCategoryRepositoryFromDatasource_FindCategories(t *testing.T) {
+
+	t.Run("with a two-level dataset, returns only the top-level categories", func(t *testing.T) {
+
+		// Given: el repositorio de prueba armado sobre un dataset de dos niveles.
+		repository := mustNewYamlCategoryRepositoryFromFiles(t, twoLevelCategoryFiles())
+
+		// When: se consultan las categorías de primer nivel.
+		categories, err := repository.FindCategories()
+
+		// Then: solo aparece la categoría sin category_id, no las anidadas.
+		require.Nil(t, err, "FindCategories no debería fallar con un dataset válido")
+		assert.ElementsMatch(t, []string{"services"}, categoryIds(categories), "FindCategories debería devolver solo las categorías de primer nivel")
+	})
+
+	t.Run("with a top-level category, returns it without a parent", func(t *testing.T) {
+
+		// Given: el repositorio de prueba armado sobre un dataset de dos niveles.
+		repository := mustNewYamlCategoryRepositoryFromFiles(t, twoLevelCategoryFiles())
+
+		// When: se consultan las categorías de primer nivel.
+		categories, err := repository.FindCategories()
+		require.Nil(t, err, "FindCategories no debería fallar con un dataset válido")
+
+		topLevelCategory := categoryById(categories, "services")
+
+		// Then: no tiene padre, porque su category_id está vacío.
+		require.NotNil(t, topLevelCategory, "la categoría de primer nivel %q debería estar en la colección", "services")
+		assert.Nil(t, topLevelCategory.Parent, "una categoría de primer nivel no debería tener padre")
+	})
+}
+
+func TestYamlCategoryRepositoryFromDatasource_FindSubcategories(t *testing.T) {
+
+	t.Run("with a two-level dataset, returns only the nested categories", func(t *testing.T) {
+
+		// Given: el repositorio de prueba armado sobre un dataset de dos niveles.
+		repository := mustNewYamlCategoryRepositoryFromFiles(t, twoLevelCategoryFiles())
+
+		// When: se consultan las subcategorías.
+		categories, err := repository.FindSubcategories()
+
+		// Then: aparecen las tres categorías anidadas, no la de primer nivel.
+		require.Nil(t, err, "FindSubcategories no debería fallar con un dataset válido")
+		assert.ElementsMatch(t, []string{"light", "water", "gas"}, categoryIds(categories), "FindSubcategories debería devolver solo las categorías anidadas")
+	})
+
+	t.Run("with a nested category, resolves it with the parent's data", func(t *testing.T) {
+
+		// Given: el repositorio de prueba armado sobre un dataset de dos niveles.
+		repository := mustNewYamlCategoryRepositoryFromFiles(t, twoLevelCategoryFiles())
+
+		// When: se consultan las subcategorías.
+		categories, err := repository.FindSubcategories()
+		require.Nil(t, err, "FindSubcategories no debería fallar con un dataset válido")
+
+		nestedCategory := categoryById(categories, "light")
+
+		// Then: tiene un padre con el id referenciado por category_id.
+		require.NotNil(t, nestedCategory, "la categoría anidada %q debería estar en la colección", "light")
+		require.NotNil(t, nestedCategory.Parent, "la categoría anidada %q debería tener padre", "light")
+		assert.Equal(t, "services", nestedCategory.Parent.Id, "el padre resuelto debería tener el id referenciado por category_id")
+	})
+
+	t.Run("with a category that references a nonexistent parent, fails", func(t *testing.T) {
+
+		// Given: el repositorio de prueba armado sobre un archivo que referencia
+		// una categoría padre que no está definida en ningún lado.
+		repository := mustNewYamlCategoryRepositoryFromFiles(t, nonexistentParentCategoryFiles())
+
+		// When: se consultan las subcategorías.
+		categories, err := repository.FindSubcategories()
+
+		// Then: falla en vez de devolver una colección parcial o con un padre nulo silencioso.
+		require.NotNil(t, err, "FindSubcategories debería fallar ante una categoría que referencia un padre inexistente")
+		assert.Nil(t, categories, "FindSubcategories no debería devolver una colección parcial cuando falla")
+		assert.Contains(t, err.Error(), "no existe", "el error debería indicar que el padre referenciado no existe")
+	})
+}
+
 // TestIntegrityCheck agrupa los escenarios donde los archivos de categorías
 // violan las reglas de integridad que el repositorio verifica: ids duplicados
 // (al construirse, en indexRecords) y padres inexistentes (al consultar, en

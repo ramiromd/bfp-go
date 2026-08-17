@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"ramiromd/budget/internal/category/domain/entity"
+
+	"github.com/samber/lo"
 )
 
 // YamlCategoryRepository expone las categorías definidas en los archivos
@@ -138,4 +140,52 @@ func (this *YamlCategoryRepository) Count() (int, error) {
 	}
 
 	return len(records), nil
+}
+
+func (this *YamlCategoryRepository) FindCategories() ([]*entity.Category, error) {
+
+	records, err := this.datasource.Records()
+
+	if err != nil {
+		return nil, err
+	}
+
+	result := lo.Filter(records, func(item categoryDsRecord, index int) bool {
+		return item.CategoryId == ""
+	})
+
+	categories := make([]*entity.Category, len(result))
+	for i, record := range result {
+		categories[i] = entity.NewCategory(record.Id, nil, record.Name, record.Description)
+	}
+
+	return categories, nil
+
+}
+
+func (this *YamlCategoryRepository) FindSubcategories() ([]*entity.Category, error) {
+
+	records, err := this.datasource.Records()
+
+	if err != nil {
+		return nil, err
+	}
+
+	result := lo.Filter(records, func(item categoryDsRecord, index int) bool {
+		return item.CategoryId != ""
+	})
+
+	categories := make([]*entity.Category, len(result))
+	for i, record := range result {
+
+		parent, err := this.ParentLookup(record.CategoryId)
+		if err != nil {
+			return nil, err
+		}
+
+		categories[i] = entity.NewCategory(record.Id, parent, record.Name, record.Description)
+	}
+
+	return categories, nil
+
 }
