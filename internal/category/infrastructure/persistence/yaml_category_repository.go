@@ -1,49 +1,10 @@
 package persistence
 
 import (
-	"embed"
 	"fmt"
-	"io/fs"
-	"sort"
 
 	"ramiromd/budget/internal/category/domain/entity"
-	"ramiromd/budget/internal/category/domain/repository"
-
-	"gopkg.in/yaml.v3"
 )
-
-// Verifica en tiempo de compilación que el repositorio cumple el contrato del
-// dominio.
-var _ repository.CategoryRepository = (*YamlCategoryRepository)(nil)
-
-// categoriesPattern es el patrón que nombra los archivos de categorías: uno por
-// nivel de la jerarquía, numerados de menor a mayor. Se aplica sobre la raíz del
-// fs.FS que reciba el repositorio, sea el de producción o el de un test.
-const categoriesPattern = "categories.*.yml"
-
-// categoriesFS contiene los archivos categories.<n>.yml, un archivo por nivel
-// de la jerarquía. Se incrustan en el binario durante la compilación, de modo
-// que el repositorio no depende del directorio de trabajo ni de los archivos en
-// disco.
-//
-// Los archivos se descubren en runtime, así que agregar un nivel es agregar el
-// archivo: no hace falta tocar este código.
-//
-//go:embed yml/categories.*.yml
-var categoriesFS embed.FS
-
-// categoryFile representa la estructura de un archivo categories.<n>.yml.
-type categoryFile struct {
-	Categories []categoryRecord `yaml:"categories"`
-}
-
-// categoryRecord representa una categoría tal como está escrita en el archivo.
-type categoryRecord struct {
-	Id          string `yaml:"id"`
-	Name        string `yaml:"name"`
-	CategoryId  string `yaml:"category_id"`
-	Description string `yaml:"description"`
-}
 
 // YamlCategoryRepository expone las categorías definidas en los archivos
 // categories.<n>.yml. Los archivos se interpretan una única vez y el resultado
@@ -52,150 +13,129 @@ type categoryRecord struct {
 //
 // No es seguro para uso concurrente.
 type YamlCategoryRepository struct {
-	files       fs.FS
-	initialized bool
-	categories  []*entity.Category
-	indexes     map[string]int
+	indexes    map[string]int
+	datasource *YamlCategoryDatasource
 }
 
-// NewYamlCategoryRepository crea el repositorio de categorías a partir de los
-// archivos incrustados en el binario. El archivo no se interpreta hasta la
-// primera consulta.
-func NewYamlCategoryRepository() *YamlCategoryRepository {
+// NewYamlCategoryRepositoryFromDatasource crea el repositorio a partir de un
+// YamlCategoryDatasource ya construido. Si la indexación falla (por ejemplo,
+// por un id duplicado), el error queda guardado y toda consulta posterior lo
+// devuelve, en vez de operar sobre un índice parcial.
+func NewYamlCategoryRepositoryFromDatasource(datasource *YamlCategoryDatasource) (*YamlCategoryRepository, error) {
+	self := &YamlCategoryRepository{
+		indexes:    make(map[string]int, 0),
+		datasource: datasource,
+	}
 
-	files, err := fs.Sub(categoriesFS, "yml")
+	if err := self.indexRecords(); err != nil {
+		return &YamlCategoryRepository{}, err
+	}
+
+	return self, nil
+}
+
+func (this *YamlCategoryRepository) ParentLookup(parentId string) (*entity.Category, error) {
+
+	if parentId == "" {
+		return nil, nil
+	}
+
+	position, exists := this.indexes[parentId]
+	var parent *entity.Category
+
+	if exists {
+		record, _ := this.datasource.RecordAt(position)
+		parent = entity.NewCategory(record.Id, nil, record.Name, record.Description)
+	} else {
+		return nil, fmt.Errorf("La categoría %q no existe.", parentId)
+	}
+
+	return parent, nil
+
+}
+
+// indexRecords abre el datasource y mapea cada id de categoría a su posición
+// entre los records. Falla si dos records comparten el mismo id.
+func (this *YamlCategoryRepository) indexRecords() error {
+
+	if err := this.datasource.Open(); err != nil {
+		return err
+	}
+
+	records, err := this.datasource.Records()
 	if err != nil {
-		// No puede fallar: "yml" es una ruta literal, ya incrustada en el binario.
-		panic(err)
+		return err
 	}
 
-	return NewYamlCategoryRepositoryFrom(files)
-}
+	for position, record := range records {
 
-// NewYamlCategoryRepositoryFrom crea el repositorio de categorías a partir de un
-// origen de archivos arbitrario, que debe contener archivos que respeten el
-// patrón categories.<n>.yml. Pensado para parametrizar el origen en pruebas: la
-// producción usa el embed.FS incrustado en el binario, y los tests pueden usar
-// cualquier otro fs.FS (por ejemplo, otro embed.FS con fixtures propios) sin que
-// el repositorio distinga entre ambos casos.
-func NewYamlCategoryRepositoryFrom(files fs.FS) *YamlCategoryRepository {
-	return &YamlCategoryRepository{
-		files:       files,
-		initialized: false,
-		categories:  nil,
-		indexes:     nil,
+		if _, exists := this.indexes[record.Id]; exists {
+			return fmt.Errorf("Categoría duplicada: %q", record.Id)
+		}
+
+		this.indexes[record.Id] = position
 	}
+
+	return nil
 }
 
-// FindAll devuelve todas las categorías, de todos los niveles. Retorna un error
-// si el origen de datos no puede leerse.
+// FindAll devuelve todas las categorías, de todos los niveles, mapeadas a
+// partir de los records del datasource. Retorna un error si el datasource no
+// puede leerse o si una categoría referencia un padre inexistente.
 func (this *YamlCategoryRepository) FindAll() ([]*entity.Category, error) {
 
-	if err := this.initialize(); err != nil {
+	records, err := this.datasource.Records()
+	if err != nil {
 		return nil, err
 	}
 
-	return this.categories, nil
+	categories := make([]*entity.Category, len(records))
+
+	for position, record := range records {
+
+		parent, err := this.ParentLookup(record.CategoryId)
+		if err != nil {
+			return nil, err
+		}
+
+		categories[position] = entity.NewCategory(record.Id, parent, record.Name, record.Description)
+	}
+
+	return categories, nil
 }
 
-// FindById devuelve la categoría con el identificador indicado, o nil si no
-// existe. Retorna un error si el origen de datos no puede leerse.
+// FindById devuelve la categoría con el identificador indicado, mapeada a
+// partir de su record en el datasource, o nil si no existe. Resuelve el padre
+// buscándolo recursivamente por su id. Retorna un error si el datasource no
+// puede leerse o si la categoría referencia un padre inexistente.
 func (this *YamlCategoryRepository) FindById(id string) (*entity.Category, error) {
-
-	if err := this.initialize(); err != nil {
-		return nil, err
-	}
 
 	position, exists := this.indexes[id]
 	if !exists {
 		return nil, nil
 	}
 
-	return this.categories[position], nil
+	record, err := this.datasource.RecordAt(position)
+	if err != nil {
+		return nil, err
+	}
+
+	parent, err := this.ParentLookup(record.CategoryId)
+	if err != nil {
+		return nil, err
+	}
+
+	return entity.NewCategory(record.Id, parent, record.Name, record.Description), nil
 }
 
 // Count devuelve la cantidad de categorías definidas. Retorna un error si el
-// origen de datos no puede leerse.
+// datasource no puede leerse.
 func (this *YamlCategoryRepository) Count() (int, error) {
 
-	if err := this.initialize(); err != nil {
+	records, err := this.datasource.Records()
+	if err != nil {
 		return 0, err
 	}
 
-	return len(this.categories), nil
-}
-
-// initialize descubre los archivos incrustados y los interpreta en una única
-// colección de categorías. Las llamadas posteriores a la primera reutilizan el
-// resultado.
-func (this *YamlCategoryRepository) initialize() error {
-
-	if this.initialized {
-		return nil
-	}
-
-	fileNames, err := fs.Glob(this.files, categoriesPattern)
-	if err != nil {
-		return fmt.Errorf("No se pudieron listar los archivos de categorías: %w", err)
-	}
-
-	// El orden importa: una categoría sólo puede referenciar como padre a otra de
-	// un nivel anterior, así que al recorrer los archivos de menor a mayor nivel
-	// el padre ya está armado cuando se lo necesita. El orden lexicográfico
-	// alcanza mientras los niveles sean de un dígito; del décimo en adelante
-	// habría que numerarlos con dos ("categories.09.yml").
-	sort.Strings(fileNames)
-
-	this.categories = make([]*entity.Category, 0)
-	this.indexes = make(map[string]int)
-
-	for _, fileName := range fileNames {
-
-		content, err := fs.ReadFile(this.files, fileName)
-		if err != nil {
-			return fmt.Errorf("No se pudo leer el archivo %s: %w", fileName, err)
-		}
-
-		if err := this.load(content, fileName); err != nil {
-			return err
-		}
-	}
-
-	this.initialized = true
-
-	return nil
-}
-
-// load interpreta el contenido de un archivo de categorías y suma sus entidades
-// a la colección. Espera que las categorías referenciadas como padre ya estén
-// cargadas.
-func (this *YamlCategoryRepository) load(content []byte, fileName string) error {
-
-	file := categoryFile{}
-	if err := yaml.Unmarshal(content, &file); err != nil {
-		return fmt.Errorf("El archivo %s no tiene un formato válido: %w", fileName, err)
-	}
-
-	for _, record := range file.Categories {
-
-		if _, exists := this.indexes[record.Id]; exists {
-			return fmt.Errorf("El archivo %s define una categoría duplicada: %q", fileName, record.Id)
-		}
-
-		var parent *entity.Category
-
-		if record.CategoryId != "" {
-			position, exists := this.indexes[record.CategoryId]
-			if !exists {
-				return fmt.Errorf("La categoría %q del archivo %s referencia una categoría padre inexistente: %q", record.Id, fileName, record.CategoryId)
-			}
-			parent = this.categories[position]
-		}
-
-		category := entity.NewCategory(record.Id, parent, record.Name, record.Description)
-		this.categories = append(this.categories, category)
-		this.indexes[record.Id] = len(this.categories) - 1
-	}
-
-	return nil
+	return len(records), nil
 }
