@@ -17,7 +17,8 @@ import (
 var _ repository.CategoryRepository = (*YamlCategoryRepository)(nil)
 
 // categoriesPattern es el patrón que nombra los archivos de categorías: uno por
-// nivel de la jerarquía, numerados de menor a mayor.
+// nivel de la jerarquía, numerados de menor a mayor. Se aplica sobre la raíz del
+// fs.FS que reciba el repositorio, sea el de producción o el de un test.
 const categoriesPattern = "categories.*.yml"
 
 // categoriesFS contiene los archivos categories.<n>.yml, un archivo por nivel
@@ -28,7 +29,7 @@ const categoriesPattern = "categories.*.yml"
 // Los archivos se descubren en runtime, así que agregar un nivel es agregar el
 // archivo: no hace falta tocar este código.
 //
-//go:embed categories.*.yml
+//go:embed yml/categories.*.yml
 var categoriesFS embed.FS
 
 // categoryFile representa la estructura de un archivo categories.<n>.yml.
@@ -51,15 +52,35 @@ type categoryRecord struct {
 //
 // No es seguro para uso concurrente.
 type YamlCategoryRepository struct {
+	files       fs.FS
 	initialized bool
 	categories  []*entity.Category
 	indexes     map[string]int
 }
 
-// NewYamlCategoryRepository crea el repositorio de categorías. El archivo no se
-// interpreta hasta la primera consulta.
+// NewYamlCategoryRepository crea el repositorio de categorías a partir de los
+// archivos incrustados en el binario. El archivo no se interpreta hasta la
+// primera consulta.
 func NewYamlCategoryRepository() *YamlCategoryRepository {
+
+	files, err := fs.Sub(categoriesFS, "yml")
+	if err != nil {
+		// No puede fallar: "yml" es una ruta literal, ya incrustada en el binario.
+		panic(err)
+	}
+
+	return NewYamlCategoryRepositoryFrom(files)
+}
+
+// NewYamlCategoryRepositoryFrom crea el repositorio de categorías a partir de un
+// origen de archivos arbitrario, que debe contener archivos que respeten el
+// patrón categories.<n>.yml. Pensado para parametrizar el origen en pruebas: la
+// producción usa el embed.FS incrustado en el binario, y los tests pueden usar
+// cualquier otro fs.FS (por ejemplo, otro embed.FS con fixtures propios) sin que
+// el repositorio distinga entre ambos casos.
+func NewYamlCategoryRepositoryFrom(files fs.FS) *YamlCategoryRepository {
 	return &YamlCategoryRepository{
+		files:       files,
 		initialized: false,
 		categories:  nil,
 		indexes:     nil,
@@ -113,7 +134,7 @@ func (this *YamlCategoryRepository) initialize() error {
 		return nil
 	}
 
-	fileNames, err := fs.Glob(categoriesFS, categoriesPattern)
+	fileNames, err := fs.Glob(this.files, categoriesPattern)
 	if err != nil {
 		return fmt.Errorf("No se pudieron listar los archivos de categorías: %w", err)
 	}
@@ -130,7 +151,7 @@ func (this *YamlCategoryRepository) initialize() error {
 
 	for _, fileName := range fileNames {
 
-		content, err := categoriesFS.ReadFile(fileName)
+		content, err := fs.ReadFile(this.files, fileName)
 		if err != nil {
 			return fmt.Errorf("No se pudo leer el archivo %s: %w", fileName, err)
 		}
